@@ -173,9 +173,7 @@ export default function NewSessionPage() {
       const data: { text: string; fileCount: number } = await res.json();
       setPyqResult(data);
       setPyqStatus("uploaded");
-      if (extractResult?.sessionId) {
-        saveSession(extractResult.sessionId, { pyqText: data.text });
-      }
+      // Session update handled server-side in /api/extract-pyq
     } catch (err: any) {
       console.error(err);
       setPyqStatus("idle");

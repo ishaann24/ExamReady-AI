@@ -76,7 +76,7 @@ export default function ReadinessReportPage({ params }: ReportPageProps) {
   }
 
   const improvedTopics =
-    report?.strongTopics.filter((t) => !report?.remainingWeakTopics.includes(t)) || [];
+    (report?.strongTopics ?? []).filter((t) => !(report?.remainingWeakTopics ?? []).includes(t));
 
   const getBorderColor = (status: string) => {
     switch (status) {
@@ -163,10 +163,10 @@ export default function ReadinessReportPage({ params }: ReportPageProps) {
       {/* Remaining Weak Topics */}
       <section className="mb-8">
         <h2 className="text-xl font-semibold mb-2">Remaining Weak / Needs Revision Topics</h2>
-        {report?.remainingWeakTopics.length > 0 ? (
+        {(report?.remainingWeakTopics?.length ?? 0) > 0 ? (
           <div className="space-y-3">
             {topics
-              .filter((t) => report?.remainingWeakTopics.includes(t.name))
+                             .filter((t) => (report?.remainingWeakTopics ?? []).includes(t.name))
               .map((t) => (
                 <div
                   key={t.name}
@@ -193,7 +193,7 @@ export default function ReadinessReportPage({ params }: ReportPageProps) {
         <h2 className="text-lg font-semibold mb-3">Overall Stats</h2>
         <p>Total Topics: {report?.totalTopics}</p>
         <p>Assessed Topics: {report?.assessedTopics}</p>
-        <p>Strong Topics: {report?.strongTopics.length}</p>
+        <p>Strong Topics: {(report?.strongTopics?.length ?? 0)}</p>
         <p>Diagnostic – Correct: {report?.diagnostic.correct} / {report?.diagnostic.total}</p>
         <p>Follow‑up – Correct: {report?.followup.correct} / {report?.followup.total}</p>
       </section>
