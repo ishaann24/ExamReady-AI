@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #12141A;
+  --surface: #F2F1EC;
+  --muted: #8B93A6;
+  --accent: #D98E3F;
+  --status-strong: #3D6B54;
+  --status-weak: #8A3B3B;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--surface);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
