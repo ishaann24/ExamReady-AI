@@ -27,9 +27,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const saveQuestionsToSession = (qList: Question[]) => {
+    const saveQuestionsToSession = async (qList: Question[]) => {
       if (sessionId) {
-        saveSession(sessionId, { questions: qList });
+        await saveSession(sessionId, { questions: qList });
       }
     };
 
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
       try {
         const parsed = JSON.parse(cachedData);
         if (parsed && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
-          saveQuestionsToSession(parsed.questions);
+          await saveQuestionsToSession(parsed.questions);
           return NextResponse.json({ questions: parsed.questions });
         }
       } catch (e) {
@@ -124,7 +124,7 @@ ${truncatedText}`;
       }
 
       setCached(cacheKey, JSON.stringify(parsed));
-      saveQuestionsToSession(parsed.questions);
+      await saveQuestionsToSession(parsed.questions);
 
       return NextResponse.json({ questions: parsed.questions });
     } catch (parseErr: any) {

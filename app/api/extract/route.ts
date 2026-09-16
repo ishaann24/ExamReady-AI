@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     const fileName = (file as File).name || "document.pdf";
     const sessionId = `session_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 
-    saveSession(sessionId, {
+    await saveSession(sessionId, {
       id: sessionId,
       fileName,
       pages: pdfData.numpages,

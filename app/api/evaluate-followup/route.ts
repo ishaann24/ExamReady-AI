@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const session = getSession(sessionId);
+    const session = await getSession(sessionId);
     const previousStatus: KnowledgeGapStatus =
       session?.knowledgeGaps?.[topic] || "not_assessed";
 
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
         ...(session.knowledgeGaps || {}),
         [topic]: updatedStatus,
       };
-      saveSession(sessionId, { knowledgeGaps: updatedGaps });
+      await saveSession(sessionId, { knowledgeGaps: updatedGaps });
     }
 
     return NextResponse.json({

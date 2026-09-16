@@ -16,7 +16,7 @@ export async function GET(
       );
     }
 
-    const session = getSession(id);
+    const session = await getSession(id);
     if (!session) {
       return NextResponse.json(
         { error: `Session '${id}' not found.` },

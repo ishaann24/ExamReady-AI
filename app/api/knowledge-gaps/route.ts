@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const session = getSession(sessionId);
+    const session = await getSession(sessionId);
     if (!session) {
       return NextResponse.json(
         { error: `Session '${sessionId}' not found.` },
@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
     prioritizedTopics.sort((a, b) => b.priorityScore - a.priorityScore);
 
     // Save updated knowledgeGaps onto session record
-    saveSession(sessionId, { knowledgeGaps });
+    await saveSession(sessionId, { knowledgeGaps });
 
     return NextResponse.json({
       knowledgeGaps,

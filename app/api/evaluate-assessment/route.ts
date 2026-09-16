@@ -79,13 +79,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (sessionId) {
-      const existingSession = getSession(sessionId);
+      const existingSession = await getSession(sessionId);
       const updatedGaps = {
         ...(existingSession?.knowledgeGaps || {}),
         ...knowledgeGaps,
       };
 
-      saveSession(sessionId, {
+      await saveSession(sessionId, {
         results: {
           results,
           score,

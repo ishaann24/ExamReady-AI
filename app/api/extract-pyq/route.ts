@@ -39,11 +39,11 @@ export async function POST(req: NextRequest) {
 
     // If a sessionId is provided, attach the extracted text to that session.
     if (sessionId) {
-      const existing = getSession(sessionId);
+      const existing = await getSession(sessionId);
       if (!existing) {
         return NextResponse.json({ error: `Session ${sessionId} not found` }, { status: 404 });
       }
-      saveSession(sessionId, { pyqText: combinedText.trim() });
+      await saveSession(sessionId, { pyqText: combinedText.trim() });
     }
 
     return NextResponse.json({ text: combinedText.trim(), fileCount: files.length });

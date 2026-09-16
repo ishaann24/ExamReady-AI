@@ -11,7 +11,7 @@ export async function GET(_req: Request, { params }: { params: { sessionId: stri
     return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
   }
 
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
   if (!session) {
     return NextResponse.json({ error: `Session '${sessionId}' not found.` }, { status: 404 });
   }

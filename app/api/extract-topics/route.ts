@@ -19,13 +19,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const saveTopicsToSession = (topicsList: Topic[]) => {
+    const saveTopicsToSession = async (topicsList: Topic[]) => {
       if (sessionId) {
         const knowledgeGaps: Record<string, KnowledgeGapStatus> = {};
         topicsList.forEach((t) => {
           knowledgeGaps[t.name] = "not_assessed";
         });
-        saveSession(sessionId, {
+        await saveSession(sessionId, {
           topics: topicsList,
           knowledgeGaps,
         });
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
       try {
         const parsed = JSON.parse(cachedData);
         if (parsed && Array.isArray(parsed.topics)) {
-          saveTopicsToSession(parsed.topics);
+          await saveTopicsToSession(parsed.topics);
           return NextResponse.json({ topics: parsed.topics });
         }
       } catch (e) {
@@ -92,7 +92,7 @@ ${truncatedText}`;
       // Save parsed result to local cache
       setCached(cacheKey, JSON.stringify(parsed));
 
-      saveTopicsToSession(parsed.topics);
+      await saveTopicsToSession(parsed.topics);
 
       return NextResponse.json({ topics: parsed.topics });
     } catch (parseErr: any) {
