@@ -5,8 +5,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PrioritizedTopic } from "@/app/api/knowledge-gaps/route";
-import { PDFDownloadLink } from "@react-pdf/renderer";
-import { ReadinessReportPDF } from "@/lib/pdf/readiness-report-pdf";
 
 interface ReadinessReportData {
   totalTopics: number;
@@ -129,21 +127,13 @@ export default function ReadinessReportPage({ params }: ReportPageProps) {
 
       {/* PDF Download */}
       <div className="mb-4">
-        <PDFDownloadLink
-          document={
-            <ReadinessReportPDF
-              improvedTopics={improvedTopics}
-              remainingWeakTopics={report?.remainingWeakTopics || []}
-              diagnosticCorrect={report?.diagnostic.correct ?? 0}
-              diagnosticTotal={report?.diagnostic.total ?? 0}
-              followupCorrect={report?.followup.correct ?? 0}
-              followupTotal={report?.followup.total ?? 0}
-            />
-          }
-          fileName={`examready-report-${sessionId}.pdf`}
+        <a
+          href={`/api/readiness-report/${sessionId}/pdf`}
+          download={`examready-report-${sessionId}.pdf`}
+          className="inline-flex items-center px-4 py-2 bg-primary text-white font-medium text-sm rounded-md hover:opacity-90 transition-opacity"
         >
-          {({ loading }) => (loading ? "Generating PDF..." : "Download as PDF")}
-        </PDFDownloadLink>
+          Download as PDF
+        </a>
       </div>
 
       {/* What Improved */}
