@@ -4,7 +4,17 @@ import React from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { PrioritizedTopic } from "@/app/api/knowledge-gaps/route";
+
+const PDFDownloadButton = dynamic(() => import("@/components/pdf-download-button"), {
+  ssr: false,
+  loading: () => (
+    <span className="inline-flex items-center px-4 py-2 bg-primary/70 text-white font-medium text-sm rounded-md cursor-wait">
+      Preparing PDF...
+    </span>
+  ),
+});
 
 interface ReadinessReportData {
   totalTopics: number;
@@ -127,13 +137,15 @@ export default function ReadinessReportPage({ params }: ReportPageProps) {
 
       {/* PDF Download */}
       <div className="mb-4">
-        <a
-          href={`/api/readiness-report/${sessionId}/pdf`}
-          download={`examready-report-${sessionId}.pdf`}
-          className="inline-flex items-center px-4 py-2 bg-primary text-white font-medium text-sm rounded-md hover:opacity-90 transition-opacity"
-        >
-          Download as PDF
-        </a>
+        <PDFDownloadButton
+          sessionId={sessionId}
+          improvedTopics={improvedTopics}
+          remainingWeakTopics={report?.remainingWeakTopics || []}
+          diagnosticCorrect={report?.diagnostic.correct ?? 0}
+          diagnosticTotal={report?.diagnostic.total ?? 0}
+          followupCorrect={report?.followup.correct ?? 0}
+          followupTotal={report?.followup.total ?? 0}
+        />
       </div>
 
       {/* What Improved */}
