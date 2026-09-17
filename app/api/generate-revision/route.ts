@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { getSession } from "@/lib/db";
+import { createClient } from "@/lib/supabase/server";
+import { getSession, saveQuestions, getTopicIdByName } from "@/lib/db";
 import { callGemini } from "@/lib/gemini";
 import { getCached, setCached } from "@/lib/gemini-cache";
 import { Question } from "@/lib/types";
@@ -17,6 +18,15 @@ export interface RevisionSession {
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await req.json();
     const { sessionId, topic } = body;
 
@@ -37,7 +47,7 @@ export async function POST(req: NextRequest) {
     const session = await getSession(sessionId);
     if (!session) {
       return NextResponse.json(
-        { error: `Session '${sessionId}' not found.` },
+        { error: `Session '${sessionId}' not found or forbidden.` },
         { status: 404 }
       );
     }
@@ -59,6 +69,36 @@ export async function POST(req: NextRequest) {
             )
             .join("\n\n")
         : "No specific diagnostic questions were missed for this topic.";
+
+    const saveFollowupQuestions = async (pQuestions: Question[]) => {
+      const topicId = await getTopicIdByName(sessionId, topic);
+      const topicNameToIdMap: Record<string, string> = {};
+      if (topicId) {
+        topicNameToIdMap[topic] = topicId;
+      }
+
+      const questionsToSave = pQuestions.map((q) => ({
+        topic,
+        difficulty: q.difficulty || "conceptual",
+        question: q.question,
+        options: q.options,
+        correct_index: q.correct_index,
+        explanation: q.explanation,
+        question_type: "followup",
+      }));
+
+      const savedRows = await saveQuestions(sessionId, topicNameToIdMap, questionsToSave);
+
+      return savedRows.map((r) => ({
+        id: r.id,
+        topic,
+        difficulty: (r.difficulty as any) || "conceptual",
+        question: r.question_text,
+        options: r.options,
+        correct_index: r.correct_index,
+        explanation: r.explanation || "",
+      }));
+    };
 
     // Compute cache key
     const cacheKey = crypto
@@ -82,7 +122,11 @@ export async function POST(req: NextRequest) {
           parsed.explanation &&
           Array.isArray(parsed.practiceQuestions)
         ) {
-          return NextResponse.json(parsed);
+          const savedPracticeQuestions = await saveFollowupQuestions(parsed.practiceQuestions);
+          return NextResponse.json({
+            ...parsed,
+            practiceQuestions: savedPracticeQuestions,
+          });
         }
       } catch (e) {
         // Fallback to API if cache fails
@@ -157,8 +201,12 @@ Return ONLY a valid JSON object matching this exact structure with NO markdown f
       }
 
       setCached(cacheKey, JSON.stringify(parsed));
+      const savedPracticeQuestions = await saveFollowupQuestions(parsed.practiceQuestions);
 
-      return NextResponse.json(parsed);
+      return NextResponse.json({
+        ...parsed,
+        practiceQuestions: savedPracticeQuestions,
+      });
     } catch (parseErr: any) {
       console.error("JSON Parse Error for Revision response:", rawResponse);
       return NextResponse.json(

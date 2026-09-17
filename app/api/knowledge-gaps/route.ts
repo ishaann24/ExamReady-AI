@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, saveSession } from "@/lib/db";
+import { createClient } from "@/lib/supabase/server";
+import { getSession, updateTopicStatus, getTopicIdByName } from "@/lib/db";
 import { KnowledgeGapStatus, Question, AnswerResult } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -16,6 +17,15 @@ export interface PrioritizedTopic {
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await req.json();
     const { sessionId } = body;
 
@@ -56,9 +66,6 @@ export async function POST(req: NextRequest) {
     const knowledgeGaps: Record<string, KnowledgeGapStatus> = {};
     const prioritizedTopics: PrioritizedTopic[] = [];
 
-    // Note: Future input will incorporate previous-year-paper exam relevance factor:
-    // priority = (0.5 * gap_severity) + (0.3 * exam_relevance) + (0.2 * difficulty_missed)
-
     for (const topic of topics) {
       const tResults = topicResults[topic.name] || [];
       const totalQuestions = tResults.length;
@@ -90,8 +97,18 @@ export async function POST(req: NextRequest) {
 
       knowledgeGaps[topic.name] = status;
 
+      // Update topic status in Supabase Postgres topics table
+      const topicId = await getTopicIdByName(sessionId, topic.name);
+      if (topicId) {
+        try {
+          await updateTopicStatus(topicId, status);
+        } catch (updateErr) {
+          console.error(`Failed to update status for topic ${topic.name}:`, updateErr);
+        }
+      }
+
       // Calculate Priority Score per non-strong topic
-      // priority = (0.7 * gap_severity) + (0.3 * difficulty_of_missed_questions)
+      // priority = (0.5 * gapSeverity) + (0.2 * difficulty) + (0.3 * examRelevance)
       let gapSeverity = 0;
       if (status === "weak") gapSeverity = 1.0;
       else if (status === "needs_revision") gapSeverity = 0.5;
@@ -115,7 +132,6 @@ export async function POST(req: NextRequest) {
         avgDifficultyScore = sum / missedResults.length;
       }
 
-      // Compute exam relevance from previous-year papers (PYQ)
       let examRelevance = 0;
       if (session.pyqRelevance && session.pyqRelevance[topic.name]) {
         const maxCount = Math.max(
@@ -143,9 +159,6 @@ export async function POST(req: NextRequest) {
 
     // Sort topics by priorityScore descending
     prioritizedTopics.sort((a, b) => b.priorityScore - a.priorityScore);
-
-    // Save updated knowledgeGaps onto session record
-    await saveSession(sessionId, { knowledgeGaps });
 
     return NextResponse.json({
       knowledgeGaps,

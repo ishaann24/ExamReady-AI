@@ -1,36 +1,55 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/db";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { ReadinessReportPDF } from "@/lib/pdf/readiness-report-pdf";
 
 export const runtime = "nodejs";
 
-export async function GET(_req: Request, { params }: { params: { sessionId: string } }) {
-  const { sessionId } = params;
-  if (!sessionId) {
-    return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
-  }
-
-  const session = await getSession(sessionId);
-  if (!session) {
-    return NextResponse.json({ error: `Session '${sessionId}' not found.` }, { status: 404 });
-  }
-
-  const knowledgeGaps = session.knowledgeGaps || {};
-  const strongTopics = Object.entries(knowledgeGaps)
-    .filter(([, s]) => s === "strong")
-    .map(([name]) => name);
-
-  const remainingWeakTopics = Object.entries(knowledgeGaps)
-    .filter(([, s]) => s === "weak" || s === "needs_revision")
-    .map(([name]) => name);
-
-  const improvedTopics = strongTopics.filter((t) => !remainingWeakTopics.includes(t));
-
-  const diagnosticTotal = session.results?.results?.length || 0;
-  const diagnosticCorrect = session.results?.results?.filter((r) => r.correct).length || 0;
-
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { sessionId: string } }
+) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { sessionId } = params;
+    if (!sessionId) {
+      return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
+    }
+
+    const session = await getSession(sessionId);
+    if (!session) {
+      return NextResponse.json(
+        { error: `Session '${sessionId}' not found or access forbidden.` },
+        { status: 404 }
+      );
+    }
+
+    const knowledgeGaps = session.knowledgeGaps || {};
+    const strongTopics = Object.entries(knowledgeGaps)
+      .filter(([, s]) => s === "strong")
+      .map(([name]) => name);
+
+    const remainingWeakTopics = Object.entries(knowledgeGaps)
+      .filter(([, s]) => s === "weak" || s === "needs_revision")
+      .map(([name]) => name);
+
+    const improvedTopics = strongTopics.filter(
+      (t) => !remainingWeakTopics.includes(t)
+    );
+
+    const diagnosticTotal = session.results?.results?.length || 0;
+    const diagnosticCorrect =
+      session.results?.results?.filter((r) => r.correct).length || 0;
+
     const pdfBuffer = await renderToBuffer(
       <ReadinessReportPDF
         subjectName={session.fileName || "Course Study Material"}

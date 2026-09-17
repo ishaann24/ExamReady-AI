@@ -142,19 +142,6 @@ export default function RevisionPage({
 
   return (
     <main className="min-h-screen bg-surface-muted text-text flex flex-col justify-between px-6 py-12 md:px-16 md:py-20 max-w-5xl mx-auto w-full">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-slate-200 pb-6">
-        <Link
-          href="/"
-          className="font-bold text-sm tracking-wider uppercase text-primary hover:opacity-80 transition-opacity"
-        >
-          ExamReady AI
-        </Link>
-        <span className="text-xs text-text-muted border border-slate-300 px-2.5 py-1 rounded-md bg-surface shadow-xs">
-          Focused Revision
-        </span>
-      </header>
-
       {/* Main Content Area */}
       <div className="my-auto py-12 max-w-xl mx-auto w-full">
         {phase === "loading" && (

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { callGemini } from "@/lib/gemini";
 import { getCached, setCached } from "@/lib/gemini-cache";
-import { saveSession } from "@/lib/db";
+import { createClient } from "@/lib/supabase/server";
+import { saveQuestions, getSession } from "@/lib/db";
 import { Question } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -10,6 +11,15 @@ export type { Question };
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await req.json();
     const { text, topics, sessionId } = body;
 
@@ -27,10 +37,43 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const saveQuestionsToSession = async (qList: Question[]) => {
-      if (sessionId) {
-        await saveSession(sessionId, { questions: qList });
+    const saveQuestionsToSession = async (qList: any[]) => {
+      if (!sessionId) return qList;
+
+      // Fetch session topics from database to construct name-to-id mapping
+      const session = await getSession(sessionId);
+      const topicNameToIdMap: Record<string, string> = {};
+
+      // If we have existing topics in DB, map them
+      if (session && session.topics) {
+        // Query topics table to get real topic UUIDs
+        const { data: dbTopics } = await supabase
+          .from("topics")
+          .select("id, name")
+          .eq("exam_session_id", sessionId);
+
+        (dbTopics || []).forEach((t) => {
+          topicNameToIdMap[t.name] = t.id;
+        });
       }
+
+      const savedRows = await saveQuestions(sessionId, topicNameToIdMap, qList);
+
+      return savedRows.map((r) => {
+        const topicName =
+          Object.keys(topicNameToIdMap).find(
+            (k) => topicNameToIdMap[k] === r.topic_id
+          ) || "";
+        return {
+          id: r.id,
+          topic: topicName,
+          difficulty: r.difficulty || "conceptual",
+          question: r.question_text,
+          options: r.options,
+          correct_index: r.correct_index,
+          explanation: r.explanation,
+        };
+      });
     };
 
     // Cache key based on sha256 hash of input text and topics
@@ -44,8 +87,8 @@ export async function POST(req: NextRequest) {
       try {
         const parsed = JSON.parse(cachedData);
         if (parsed && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
-          await saveQuestionsToSession(parsed.questions);
-          return NextResponse.json({ questions: parsed.questions });
+          const finalQuestions = await saveQuestionsToSession(parsed.questions);
+          return NextResponse.json({ questions: finalQuestions });
         }
       } catch (e) {
         // Fallback to API if cache fails
@@ -124,9 +167,9 @@ ${truncatedText}`;
       }
 
       setCached(cacheKey, JSON.stringify(parsed));
-      await saveQuestionsToSession(parsed.questions);
+      const finalQuestions = await saveQuestionsToSession(parsed.questions);
 
-      return NextResponse.json({ questions: parsed.questions });
+      return NextResponse.json({ questions: finalQuestions });
     } catch (parseErr: any) {
       console.error("JSON Parse Error for Gemini response:", rawResponse);
       return NextResponse.json(

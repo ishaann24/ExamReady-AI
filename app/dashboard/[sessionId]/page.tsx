@@ -132,7 +132,9 @@ export default function DashboardHubPage({
 
   // Calculate live exam date & days remaining
   const createdDate = new Date(session.createdAt || Date.now());
-  const examDate = new Date(createdDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const examDate = session.examDate
+    ? new Date(session.examDate)
+    : new Date(createdDate.getTime() + 14 * 24 * 60 * 60 * 1000);
   const today = new Date();
   const diffMs = examDate.getTime() - today.getTime();
   const daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
@@ -202,24 +204,6 @@ export default function DashboardHubPage({
 
   return (
     <main className="min-h-screen bg-surface-muted text-text flex flex-col justify-between px-6 py-10 md:px-16 md:py-16 max-w-5xl mx-auto w-full">
-      {/* Navigation Header */}
-      <header className="flex items-center justify-between border-b border-slate-200 pb-6 mb-8">
-        <Link
-          href="/"
-          className="font-bold text-sm tracking-wider uppercase text-primary hover:opacity-80 transition-opacity"
-        >
-          ExamReady AI
-        </Link>
-        <div className="flex items-center gap-3">
-          <Link
-            href="/new-session"
-            className="text-xs font-semibold text-text hover:text-primary border border-slate-300 px-3 py-1.5 rounded-md bg-surface transition-colors"
-          >
-            + New Material
-          </Link>
-        </div>
-      </header>
-
       <div className="space-y-8 mb-12">
         {/* 1. EXAM HEADER CARD (Primary Visual Anchor) */}
         <section className="bg-primary text-white rounded-lg p-6 sm:p-8 shadow-md">

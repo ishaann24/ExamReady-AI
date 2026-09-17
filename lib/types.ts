@@ -48,5 +48,8 @@ export interface Session {
   results?: AssessmentResult;
   knowledgeGaps: Record<string, KnowledgeGapStatus>;
   pyqRelevance?: Record<string, { questionCount: number; note: string }>;
+  examDate?: string | null;
+  availableStudyTimeMinutes?: number | null;
   createdAt: string;
 }
+

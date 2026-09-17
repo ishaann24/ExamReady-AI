@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, saveSession } from "@/lib/db";
+import { createClient } from "@/lib/supabase/server";
+import { getSession, recordAttempt, updateTopicStatus, getTopicIdByName } from "@/lib/db";
 import { AnswerResult, KnowledgeGapStatus, Question } from "@/lib/types";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await req.json();
     const { sessionId, topic, questions, answers } = body as {
       sessionId: string;
@@ -42,7 +52,9 @@ export async function POST(req: NextRequest) {
     let score = 0;
     const max_score = questions.length;
 
-    const results: AnswerResult[] = questions.map((q) => {
+    const results: AnswerResult[] = [];
+
+    for (const q of questions) {
       const selected_index = answers[q.id] ?? -1;
       const correct = selected_index === q.correct_index;
 
@@ -50,7 +62,15 @@ export async function POST(req: NextRequest) {
         score += 1;
       }
 
-      return {
+      if (q.id) {
+        try {
+          await recordAttempt(q.id, selected_index, correct);
+        } catch (attErr) {
+          console.error(`Failed to record attempt for question ${q.id}:`, attErr);
+        }
+      }
+
+      results.push({
         question_id: q.id,
         topic: q.topic || topic,
         question: q.question,
@@ -63,8 +83,8 @@ export async function POST(req: NextRequest) {
             ? q.options[selected_index]
             : "No answer selected",
         correct_option_text: q.options[q.correct_index] || "",
-      };
-    });
+      });
+    }
 
     let updatedStatus: KnowledgeGapStatus = previousStatus;
     let improved = false;
@@ -83,13 +103,14 @@ export async function POST(req: NextRequest) {
       improved = false;
     }
 
-    // Save updated knowledgeGaps in session record
-    if (session) {
-      const updatedGaps = {
-        ...(session.knowledgeGaps || {}),
-        [topic]: updatedStatus,
-      };
-      await saveSession(sessionId, { knowledgeGaps: updatedGaps });
+    // Save updated status in topics table
+    const topicId = await getTopicIdByName(sessionId, topic);
+    if (topicId) {
+      try {
+        await updateTopicStatus(topicId, updatedStatus);
+      } catch (updateErr) {
+        console.error(`Failed to update status for topic ${topic}:`, updateErr);
+      }
     }
 
     return NextResponse.json({

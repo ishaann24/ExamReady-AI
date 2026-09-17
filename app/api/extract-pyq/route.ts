@@ -1,31 +1,57 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
 import pdfParse from "pdf-parse";
-import { getSession, saveSession } from "@/lib/db";
+import { createClient } from "@/lib/supabase/server";
+import { savePyqText } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 /**
  * POST /api/extract-pyq
- * Accepts multiple PDF files (field name "files") and an optional "sessionId".
+ * Accepts multiple PDF files (field name "files") and a required "sessionId".
  * Extracts text from each PDF, concatenates them, and saves the combined text as
- * `pyqText` on the corresponding session record.
- * Returns the concatenated text and the number of processed files.
+ * `pyqText` on the corresponding session record using savePyqText.
  */
 export async function POST(req: NextRequest) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const formData = await req.formData();
     const files = formData.getAll("files");
     const sessionId = formData.get("sessionId") as string | null;
 
     if (!files.length) {
-      return NextResponse.json({ error: "No PDF files provided under 'files' field" }, { status: 400 });
+      return NextResponse.json(
+        { error: "No PDF files provided under 'files' field" },
+        { status: 400 }
+      );
+    }
+
+    if (!sessionId) {
+      return NextResponse.json(
+        { error: "Missing required 'sessionId' field" },
+        { status: 400 }
+      );
     }
 
     // Validate all files are PDFs
     for (const f of files) {
-      if (!(f instanceof Blob) || (f instanceof File && f.type !== "application/pdf" && !f.name.endsWith(".pdf"))) {
-        return NextResponse.json({ error: "All uploaded files must be PDF documents" }, { status: 400 });
+      if (
+        !(f instanceof Blob) ||
+        (f instanceof File &&
+          f.type !== "application/pdf" &&
+          !f.name.endsWith(".pdf"))
+      ) {
+        return NextResponse.json(
+          { error: "All uploaded files must be PDF documents" },
+          { status: 400 }
+        );
       }
     }
 
@@ -34,19 +60,13 @@ export async function POST(req: NextRequest) {
       const arrayBuffer = await (f as Blob).arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
       const pdfData = await pdfParse(buffer);
-      combinedText += pdfData.text + "\n"; // Separate with line break
+      combinedText += pdfData.text + "\n";
     }
 
-    // If a sessionId is provided, attach the extracted text to that session.
-    if (sessionId) {
-      const existing = await getSession(sessionId);
-      if (!existing) {
-        return NextResponse.json({ error: `Session ${sessionId} not found` }, { status: 404 });
-      }
-      await saveSession(sessionId, { pyqText: combinedText.trim() });
-    }
+    const trimmedPyqText = combinedText.trim();
+    await savePyqText(sessionId, trimmedPyqText);
 
-    return NextResponse.json({ text: combinedText.trim(), fileCount: files.length });
+    return NextResponse.json({ text: trimmedPyqText, fileCount: files.length });
   } catch (error: any) {
     console.error("PYQ extraction error:", error);
     return NextResponse.json(

@@ -2,13 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { callGemini } from "@/lib/gemini";
 import { getCached, setCached } from "@/lib/gemini-cache";
-import { saveSession } from "@/lib/db";
-import { KnowledgeGapStatus, Topic } from "@/lib/types";
+import { createClient } from "@/lib/supabase/server";
+import { saveTopics } from "@/lib/db";
+import { Topic } from "@/lib/types";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await req.json();
     const { text, sessionId } = body;
 
@@ -21,15 +31,14 @@ export async function POST(req: NextRequest) {
 
     const saveTopicsToSession = async (topicsList: Topic[]) => {
       if (sessionId) {
-        const knowledgeGaps: Record<string, KnowledgeGapStatus> = {};
-        topicsList.forEach((t) => {
-          knowledgeGaps[t.name] = "not_assessed";
-        });
-        await saveSession(sessionId, {
-          topics: topicsList,
-          knowledgeGaps,
-        });
+        const savedRows = await saveTopics(sessionId, topicsList);
+        return savedRows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          description: r.description,
+        }));
       }
+      return topicsList;
     };
 
     // Compute cache key using sha256 hash of input text
@@ -40,8 +49,8 @@ export async function POST(req: NextRequest) {
       try {
         const parsed = JSON.parse(cachedData);
         if (parsed && Array.isArray(parsed.topics)) {
-          await saveTopicsToSession(parsed.topics);
-          return NextResponse.json({ topics: parsed.topics });
+          const finalTopics = await saveTopicsToSession(parsed.topics);
+          return NextResponse.json({ topics: finalTopics });
         }
       } catch (e) {
         // If cache read fails, proceed to call Gemini API
@@ -92,9 +101,9 @@ ${truncatedText}`;
       // Save parsed result to local cache
       setCached(cacheKey, JSON.stringify(parsed));
 
-      await saveTopicsToSession(parsed.topics);
+      const finalTopics = await saveTopicsToSession(parsed.topics);
 
-      return NextResponse.json({ topics: parsed.topics });
+      return NextResponse.json({ topics: finalTopics });
     } catch (parseErr: any) {
       console.error("JSON Parse Error for Gemini response:", rawResponse);
       return NextResponse.json(

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -8,6 +9,15 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = params;
     if (!id) {
       return NextResponse.json(
@@ -19,7 +29,7 @@ export async function GET(
     const session = await getSession(id);
     if (!session) {
       return NextResponse.json(
-        { error: `Session '${id}' not found.` },
+        { error: `Session '${id}' not found or access forbidden.` },
         { status: 404 }
       );
     }

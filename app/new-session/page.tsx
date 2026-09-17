@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef, DragEvent, ChangeEvent } from "react";
+import { useState, useRef, useEffect, DragEvent, ChangeEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-
+import { createClient } from "@/lib/supabase/client";
 
 type SessionStep =
   | "idle"
@@ -25,21 +25,87 @@ interface Topic {
   description: string;
 }
 
+interface SubjectOption {
+  id: string;
+  name: string;
+  latest_session?: {
+    exam_date?: string | null;
+    available_study_time_minutes?: number | null;
+  } | null;
+}
+
 export default function NewSessionPage() {
   const [step, setStep] = useState<SessionStep>("idle");
   const [isDragging, setIsDragging] = useState(false);
   const [extractResult, setExtractResult] = useState<ExtractResult | null>(null);
+
+  // Subject selection state
+  const [existingSubjects, setExistingSubjects] = useState<SubjectOption[]>([]);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>("new");
+  const [subjectName, setSubjectName] = useState<string>("");
+
+  // Exam details
+  const [examDate, setExamDate] = useState<string>("");
+  const [studyTimeMinutes, setStudyTimeMinutes] = useState<string>("");
+
   const [topics, setTopics] = useState<Topic[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [pyqStatus, setPyqStatus] = useState<"idle" | "uploading" | "uploaded">("idle");
-  const [pyqResult, setPyqResult] = useState<{text:string; fileCount:number} | null>(null);
+  const [pyqResult, setPyqResult] = useState<{ text: string; fileCount: number } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pyqInputRef = useRef<HTMLInputElement>(null);
 
   const router = useRouter();
 
+  // Load user's existing subjects on mount
+  useEffect(() => {
+    const fetchSubjects = async () => {
+      try {
+        const res = await fetch("/api/subjects");
+        if (res.ok) {
+          const data = await res.json();
+          const list: SubjectOption[] = data.subjects || [];
+          setExistingSubjects(list);
+          if (list.length > 0) {
+            setSelectedSubjectId(list[0].id);
+            setSubjectName(list[0].name);
+            if (list[0].latest_session?.exam_date) {
+              setExamDate(list[0].latest_session.exam_date.slice(0, 10));
+            }
+            if (list[0].latest_session?.available_study_time_minutes) {
+              setStudyTimeMinutes(list[0].latest_session.available_study_time_minutes.toString());
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch existing subjects:", err);
+      }
+    };
+
+    fetchSubjects();
+  }, []);
+
+  const handleSubjectChange = (val: string) => {
+    setSelectedSubjectId(val);
+    if (val === "new") {
+      setSubjectName("");
+    } else {
+      const found = existingSubjects.find((s) => s.id === val);
+      if (found) {
+        setSubjectName(found.name);
+        if (found.latest_session?.exam_date) {
+          setExamDate(found.latest_session.exam_date.slice(0, 10));
+        }
+        if (found.latest_session?.available_study_time_minutes) {
+          setStudyTimeMinutes(found.latest_session.available_study_time_minutes.toString());
+        }
+      }
+    }
+  };
+
   const handleBeginAssessment = () => {
-    if (extractResult?.text && topics.length > 0) {
+    if (extractResult?.text && topics.length > 0 && extractResult.sessionId) {
       sessionStorage.setItem(
         "examready_session_data",
         JSON.stringify({
@@ -48,7 +114,7 @@ export default function NewSessionPage() {
           sessionId: extractResult.sessionId,
         })
       );
-      router.push("/assessment");
+      router.push(`/dashboard/${extractResult.sessionId}`);
     }
   };
 
@@ -76,12 +142,18 @@ export default function NewSessionPage() {
         throw new Error(errorData.error || "Failed to extract text from PDF.");
       }
 
-      const data: { pages: number; text: string; sessionId?: string } = await res.json();
+      const data: { pages: number; text: string } = await res.json();
+
+      // If user is creating a new subject and hasn't typed a name yet, prefill from filename
+      if (selectedSubjectId === "new" && !subjectName.trim()) {
+        const defaultSubject = file.name.replace(/\.pdf$/i, "").replace(/[-_]/g, " ");
+        setSubjectName(defaultSubject);
+      }
+
       setExtractResult({
         pages: data.pages,
         text: data.text,
         fileName: file.name,
-        sessionId: data.sessionId,
       });
       setStep("pdf-ready");
     } catch (err: any) {
@@ -98,12 +170,46 @@ export default function NewSessionPage() {
     setErrorMessage("");
 
     try {
+      // 1. Verify user authentication
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push("/login?redirectTo=/new-session");
+        return;
+      }
+
+      // 2. Create DB exam session via POST /api/session/create
+      const createRes = await fetch("/api/session/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subjectId: selectedSubjectId !== "new" ? selectedSubjectId : undefined,
+          subjectName: selectedSubjectId === "new" ? (subjectName || extractResult.fileName) : undefined,
+          examDate: examDate || null,
+          studyTimeMinutes: studyTimeMinutes ? parseInt(studyTimeMinutes, 10) : null,
+          extractedText: extractResult.text,
+        }),
+      });
+
+      if (!createRes.ok) {
+        const errJson = await createRes.json().catch(() => ({}));
+        throw new Error(errJson.error || "Failed to initialize exam session.");
+      }
+
+      const { sessionId } = await createRes.json();
+
+      setExtractResult((prev) => (prev ? { ...prev, sessionId } : null));
+
+      // 3. Extract topics from material
       const res = await fetch("/api/extract-topics", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: extractResult.text,
-          sessionId: extractResult.sessionId,
+          sessionId,
         }),
       });
 
@@ -118,7 +224,7 @@ export default function NewSessionPage() {
     } catch (err: any) {
       console.error(err);
       setStep("error");
-      setErrorMessage(err.message || "An error occurred while extracting topics.");
+      setErrorMessage(err.message || "An error occurred while setting up session topics.");
     }
   };
 
@@ -140,27 +246,28 @@ export default function NewSessionPage() {
     setIsDragging(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const droppedFile = e.dataTransfer.files[0];
-      handleFile(droppedFile);
+      const file = e.dataTransfer.files[0];
+      handleFile(file);
     }
   };
 
   const onFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      handleFile(e.target.files[0]);
+      const file = e.target.files[0];
+      handleFile(file);
     }
   };
 
   const onPYQFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
+    if (!e.target.files || e.target.files.length === 0 || !extractResult?.sessionId) return;
+
     setPyqStatus("uploading");
     const formData = new FormData();
     for (let i = 0; i < e.target.files.length; i++) {
       formData.append("files", e.target.files[i]);
     }
-    if (extractResult?.sessionId) {
-      formData.append("sessionId", extractResult.sessionId);
-    }
+    formData.append("sessionId", extractResult.sessionId);
+
     try {
       const res = await fetch("/api/extract-pyq", {
         method: "POST",
@@ -173,7 +280,6 @@ export default function NewSessionPage() {
       const data: { text: string; fileCount: number } = await res.json();
       setPyqResult(data);
       setPyqStatus("uploaded");
-      // Session update handled server-side in /api/extract-pyq
     } catch (err: any) {
       console.error(err);
       setPyqStatus("idle");
@@ -193,33 +299,96 @@ export default function NewSessionPage() {
 
   return (
     <main className="min-h-screen bg-surface-muted text-text flex flex-col justify-between px-6 py-12 md:px-16 md:py-20 max-w-5xl mx-auto w-full">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-slate-200 pb-6">
-        <Link href="/" className="font-bold text-sm tracking-wider uppercase text-primary hover:opacity-80 transition-opacity">
-          ExamReady AI
-        </Link>
-        <span className="text-xs text-text-muted border border-slate-300 px-2.5 py-1 rounded-md bg-surface shadow-xs">
-          New Session
-        </span>
-      </header>
-
       {/* Main Content */}
       <div className="my-auto py-12 max-w-xl mx-auto w-full">
         {step === "idle" && (
           <div>
             <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-text mb-3">
-              Upload material
+              New Exam Session
             </h1>
             <p className="text-text-muted text-base mb-8 leading-relaxed font-normal">
-              Select or drop your PDF course material to begin.
+              Select or create a subject, set your target exam date, and upload course materials.
             </p>
 
+            {/* Step 1 & 2: Subject & Exam Configuration */}
+            <div className="bg-surface p-6 rounded-md border border-slate-200 space-y-4 mb-8 shadow-xs">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+                  Subject / Course
+                </label>
+                {existingSubjects.length > 0 ? (
+                  <div className="space-y-3">
+                    <select
+                      value={selectedSubjectId}
+                      onChange={(e) => handleSubjectChange(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-surface text-text font-medium"
+                    >
+                      {existingSubjects.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                      <option value="new">+ Create New Subject...</option>
+                    </select>
+
+                    {selectedSubjectId === "new" && (
+                      <input
+                        type="text"
+                        value={subjectName}
+                        onChange={(e) => setSubjectName(e.target.value)}
+                        placeholder="Enter new subject name (e.g. Organic Chemistry)"
+                        className="w-full px-3.5 py-2.5 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-surface text-text"
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={subjectName}
+                    onChange={(e) => setSubjectName(e.target.value)}
+                    placeholder="e.g. Organic Chemistry, Computer Networks"
+                    className="w-full px-3.5 py-2.5 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-surface text-text"
+                  />
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+                    Exam Date (Optional)
+                  </label>
+                  <input
+                    type="date"
+                    value={examDate}
+                    onChange={(e) => setExamDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-surface text-text"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+                    Daily Study Time (Minutes)
+                  </label>
+                  <input
+                    type="number"
+                    min="15"
+                    max="1440"
+                    value={studyTimeMinutes}
+                    onChange={(e) => setStudyTimeMinutes(e.target.value)}
+                    placeholder="e.g. 120"
+                    className="w-full px-3.5 py-2.5 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-surface text-text"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Step 3: Material PDF Upload Dropzone */}
             <div
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
               onDrop={onDrop}
               onClick={() => fileInputRef.current?.click()}
-              className={`border border-dashed rounded-md p-10 sm:p-14 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center shadow-xs ${
+              className={`border border-dashed rounded-md p-10 sm:p-12 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center shadow-xs ${
                 isDragging
                   ? "border-primary bg-blue-50/60 scale-[1.01]"
                   : "border-slate-300 hover:border-primary/60 bg-surface hover:bg-slate-50"
@@ -250,7 +419,7 @@ export default function NewSessionPage() {
               </div>
 
               <p className="text-text font-semibold text-base mb-1">
-                Drop your PDF file here, or click to browse
+                Drop course material PDF here, or click to browse
               </p>
               <p className="text-xs text-text-muted">
                 PDF documents up to 50MB
@@ -273,13 +442,13 @@ export default function NewSessionPage() {
         {step === "pdf-ready" && extractResult && (
           <div className="py-6">
             <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-text mb-3">
-              Material ready
+              Confirm Session Details
             </h1>
             <p className="text-text-muted text-base mb-8 leading-relaxed font-normal">
-              Your document has been processed and is ready for topic analysis.
+              Review your subject and exam schedule before extracting topics.
             </p>
 
-            <div className="border border-slate-200 rounded-md p-6 bg-surface shadow-xs mb-8">
+            <div className="border border-slate-200 rounded-md p-6 bg-surface shadow-xs mb-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-2.5 h-2.5 rounded-full bg-status-strong"></div>
@@ -301,12 +470,83 @@ export default function NewSessionPage() {
               </div>
             </div>
 
+            <div className="bg-surface p-6 rounded-md border border-slate-200 space-y-4 mb-8">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+                  Subject / Course Name
+                </label>
+                {existingSubjects.length > 0 ? (
+                  <div className="space-y-3">
+                    <select
+                      value={selectedSubjectId}
+                      onChange={(e) => handleSubjectChange(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-surface text-text font-medium"
+                    >
+                      {existingSubjects.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                      <option value="new">+ Create New Subject...</option>
+                    </select>
+
+                    {selectedSubjectId === "new" && (
+                      <input
+                        type="text"
+                        value={subjectName}
+                        onChange={(e) => setSubjectName(e.target.value)}
+                        placeholder="e.g. Organic Chemistry, Computer Networks"
+                        className="w-full px-3.5 py-2.5 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-surface text-text"
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={subjectName}
+                    onChange={(e) => setSubjectName(e.target.value)}
+                    placeholder="e.g. Organic Chemistry, Computer Networks"
+                    className="w-full px-3.5 py-2.5 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-surface text-text"
+                  />
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+                    Exam Date (Optional)
+                  </label>
+                  <input
+                    type="date"
+                    value={examDate}
+                    onChange={(e) => setExamDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-surface text-text"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">
+                    Daily Study Time (Minutes)
+                  </label>
+                  <input
+                    type="number"
+                    min="15"
+                    max="1440"
+                    value={studyTimeMinutes}
+                    onChange={(e) => setStudyTimeMinutes(e.target.value)}
+                    placeholder="e.g. 120"
+                    className="w-full px-3.5 py-2.5 rounded-md border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-surface text-text"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div>
               <button
                 onClick={handleExtractTopics}
                 className="bg-accent hover:bg-amber-500 text-slate-950 font-semibold px-6 py-3.5 rounded-md transition-all duration-150 text-base cursor-pointer shadow-sm w-full sm:w-auto"
               >
-                Continue
+                Extract Topics &amp; Initialize
               </button>
             </div>
           </div>
@@ -315,10 +555,10 @@ export default function NewSessionPage() {
         {step === "extracting-topics" && (
           <div className="py-16 text-center">
             <p className="text-xl font-medium text-primary tracking-tight animate-pulse">
-              Identifying key topics from your material...
+              Initializing session &amp; analyzing key topics...
             </p>
             <p className="text-xs text-text-muted mt-3">
-              Analyzing concepts for structured active recall
+              Parsing concepts for structured active recall
             </p>
           </div>
         )}
@@ -334,7 +574,7 @@ export default function NewSessionPage() {
               </span>
             </div>
             <p className="text-text-muted text-base mb-8 leading-relaxed font-normal">
-              Key topics identified in your material. Review before proceeding to your preparation session.
+              Key topics identified for <span className="font-semibold text-text">{subjectName}</span>.
             </p>
 
             <div className="border border-slate-200 rounded-md divide-y divide-slate-200 bg-surface shadow-xs mb-8">
@@ -356,8 +596,14 @@ export default function NewSessionPage() {
             </div>
 
             {/* Optional Previous-Year Papers Upload */}
-            <div className="mt-6">
-              <p className="text-text font-semibold mb-2">Upload previous-year papers (optional)</p>
+            <div className="mt-6 mb-8 border border-slate-200 rounded-md p-5 bg-surface">
+              <p className="text-sm font-semibold text-text mb-1">
+                Upload previous-year exam papers (optional)
+              </p>
+              <p className="text-xs text-text-muted mb-4">
+                Helps identify high-yield topics and frequency of past questions.
+              </p>
+
               <input
                 ref={pyqInputRef}
                 type="file"
@@ -369,23 +615,23 @@ export default function NewSessionPage() {
               />
               <label
                 htmlFor="pyq-upload"
-                className={`border border-dashed rounded-md p-4 text-center cursor-pointer transition-colors ${
+                className={`border border-dashed rounded-md p-4 text-center cursor-pointer transition-colors block ${
                   pyqStatus === "uploading"
                     ? "border-primary bg-blue-50/60"
-                    : "border-slate-300 hover:border-primary/60 bg-surface hover:bg-slate-50"
+                    : "border-slate-300 hover:border-primary/60 bg-surface-muted hover:bg-slate-100"
                 }`}
               >
-                <span className="text-text">Select PDF files</span>
+                <span className="text-sm font-medium text-text">
+                  {pyqStatus === "uploading" ? "Uploading..." : "Select PYQ PDF files"}
+                </span>
                 {pyqResult && (
-                  <p className="text-xs text-text-muted mt-1">
-                    {pyqResult.fileCount} file{pyqResult.fileCount > 1 ? "s" : ""} uploaded
+                  <p className="text-xs text-emerald-700 font-semibold mt-1">
+                    ✓ {pyqResult.fileCount} paper{pyqResult.fileCount > 1 ? "s" : ""} uploaded and linked
                   </p>
                 )}
               </label>
-              {pyqStatus === "uploading" && (
-                <p className="text-xs text-primary mt-1 animate-pulse">Uploading...</p>
-              )}
             </div>
+
             <div className="flex flex-col sm:flex-row items-center gap-4">
               <button
                 className="bg-accent hover:bg-amber-500 text-slate-950 font-semibold px-6 py-3.5 rounded-md transition-all duration-150 text-base cursor-pointer shadow-sm w-full sm:w-auto"
@@ -397,7 +643,7 @@ export default function NewSessionPage() {
                 onClick={resetUpload}
                 className="text-xs text-text-muted hover:text-text transition-colors cursor-pointer"
               >
-                Upload different material
+                Start new session
               </button>
             </div>
           </div>

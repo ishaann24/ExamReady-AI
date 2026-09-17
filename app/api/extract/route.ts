@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
 import pdfParse from "pdf-parse";
-import { saveSession } from "@/lib/db";
+import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const formData = await req.formData();
     const file = formData.get("file");
 
@@ -21,22 +29,8 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
 
     const pdfData = await pdfParse(buffer);
-    const fileName = (file as File).name || "document.pdf";
-    const sessionId = `session_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-
-    await saveSession(sessionId, {
-      id: sessionId,
-      fileName,
-      pages: pdfData.numpages,
-      extractedText: pdfData.text,
-      topics: [],
-      questions: [],
-      knowledgeGaps: {},
-      createdAt: new Date().toISOString(),
-    });
 
     return NextResponse.json({
-      sessionId,
       pages: pdfData.numpages,
       text: pdfData.text,
     });
