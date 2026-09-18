@@ -1,52 +1,81 @@
 # ExamReady AI
 
-AI-powered personalized exam preparation for college students — built for a Google hackathon.
+**AI-powered personalized exam preparation for college students.** Originally built for a Google hackathon, now developed into a full multi-user product.
 
-## What it does
+Live loop: upload lecture material → get diagnosed on what you actually understand → get told what to study first and why → revise the specific thing you got wrong → prove you improved → see it reflected on your dashboard.
 
-Instead of asking "what's in my lecture?", ExamReady AI helps students answer:
-**"What should I study next, why, and how do I know if I actually understand it?"**
+**Live deployment:** https://examreadyai-jet.vercel.app/
 
-Students upload their lecture material (and optionally previous-year question papers), take a short AI-generated diagnostic assessment, and get a personalized, priority-ranked revision plan based on their actual knowledge gaps — not a generic summary of everything.
+---
 
-### The core loop
+## The problem this solves
 
-    Upload lecture PDF → AI extracts topics → Diagnostic assessment (6 MCQs)
-        → Knowledge-gap detection → Priority engine ranks weak topics
-        → Personalized revision session → Follow-up questions
-        → Updated readiness report
+Most AI study tools stop at "upload a PDF, get a summary or a quiz." That's not actually the hard part for a student under time pressure — the hard part is knowing **what to spend limited time on**, and whether you actually understand something or just recognize it.
 
-This closed loop — **Assessment → Diagnosis → Intervention → Reassessment** — is the core differentiator from a typical "AI notes/quiz generator."
+ExamReady AI answers a different question than the usual tools:
 
-## Why this exists
+> Not "what's in my lecture?" — but **"what should I study next, why, and how do I know if I actually understand it?"**
 
-Most AI study tools stop at "upload a PDF, get a summary or a quiz." That's not the hard part for a student — the hard part is figuring out *what to actually spend limited time on* before an exam. ExamReady AI combines two ideas:
+It combines two ideas from the original product spec:
 
 - **Exam Crisis** — helping students prioritize what to study when time is limited
 - **Lecture-to-Understanding** — identifying what a student actually understands vs. what just looks familiar
 
-The product doesn't promise to predict exact exam marks, guarantee exam questions, or replace teachers. It helps students make better decisions about how to spend limited preparation time.
+It does **not** promise to predict exact exam marks, guarantee exam questions, or replace teachers. It helps students make better decisions about how to spend limited preparation time — and every recommendation it makes is explainable, not a black-box score.
+
+---
+
+## The core loop
+
+    Sign up / log in
+        → Pick a subject (new or existing)
+        → Upload lecture PDF (+ optional previous-year papers)
+        → AI extracts topics, grounded only in the uploaded material
+        → Diagnostic assessment (6 MCQs: recall / conceptual / application)
+        → Knowledge-gap detection (Strong / Needs Revision / Weak / Not Assessed)
+        → Priority engine ranks weak topics, with a plain-English reason for each
+        → Personalized revision session on the top-priority topic
+        → Follow-up questions → topic status updates based on real performance
+        → Dashboard reflects the update, points to the next priority topic
+        → Final readiness report (plain counts, downloadable as PDF)
+
+This closed loop — **Assessment → Diagnosis → Intervention → Reassessment** — is the core differentiator from a typical "AI notes/quiz generator." The AI doesn't just generate content; it uses the student's own responses to decide what to teach next.
+
+---
 
 ## Features
 
-- 📄 PDF upload with AI-driven topic extraction, grounded only in the supplied material
-- 🧠 Diagnostic assessment generated from the actual uploaded content (recall, conceptual, and application-level questions — not generic quiz filler)
-- 📊 Knowledge-gap detection across four states: Strong / Needs Revision / Weak / Not Assessed
-- 🎯 Priority engine — ranks what to study first, with a plain-language, explainable reason for every recommendation
-- 📚 Optional previous-year paper analysis — when uploaded, recommendations cite real exam-relevance evidence (e.g. "appears in 3 questions across your previous papers") instead of gap-severity alone
-- ✍️ Personalized revision sessions targeted at the specific concept a student got wrong, not a full re-explanation of the topic
-- ✅ Follow-up reassessment that updates topic mastery status based on real performance, closing the learning loop
-- 📈 Final readiness report summarizing what improved, what's still weak, and the next recommended action — using plain counts, never a fabricated "readiness score"
-- 📥 Downloadable PDF export of the readiness report
+**Core loop**
+- 📄 PDF upload with AI-driven topic extraction, grounded only in the supplied material (no invented content)
+- 🧠 Diagnostic assessment spanning recall, conceptual understanding, and application difficulty
+- 📊 Knowledge-gap detection across four honest states — never a fabricated overall score
+- 🎯 Priority engine with plain-language, explainable reasons for every recommendation
+- 📚 Optional previous-year paper analysis — when uploaded, priority reasoning cites real exam-relevance evidence (e.g. "appears in 3 questions across your previous papers")
+- ✍️ Personalized revision sessions targeted at the specific concept a student got wrong
+- ✅ Follow-up reassessment that updates topic mastery based on real performance
+- 📈 Final readiness report with plain counts and a downloadable PDF export
+
+**Accounts & data**
+- 🔐 Full authentication (Supabase Auth — email/password, email verification)
+- 🔒 Row-level security — every user's data is isolated at the database level, not just the UI level
+- 📚 Multi-subject support — "My Subjects" hub grouping multiple exam sessions per subject
+- 👤 Student profile page with real, honest aggregate stats (topics mastered, sessions completed) — no fake percentages
+
+---
 
 ## Tech stack
 
-- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS
-- **AI:** Google Gemini API (`gemini-3.6-flash`)
-- **Storage:** Vercel KV (Redis-compatible, via Upstash)
-- **PDF parsing (upload):** `pdf-parse`
-- **PDF generation (export):** `@react-pdf/renderer`
-- **Deployment:** Vercel
+| Layer | Choice |
+|---|---|
+| Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS |
+| AI | Google Gemini API (`gemini-3.6-flash`) |
+| Auth | Supabase Auth |
+| Database | Supabase Postgres, with Row-Level Security policies |
+| PDF parsing (upload) | `pdf-parse` |
+| PDF generation (export) | `@react-pdf/renderer` |
+| Deployment | Vercel |
+
+---
 
 ## Setup
 
@@ -58,54 +87,60 @@ The product doesn't promise to predict exact exam marks, guarantee exam question
 
 ### 2. Environment variables
 
-Create a `.env.local` file in the project root:
+Create `.env.local`:
 
     GEMINI_API_KEY=your_gemini_api_key
     GEMINI_MODEL=gemini-3.6-flash
-    KV_REST_API_URL=your_vercel_kv_url
-    KV_REST_API_TOKEN=your_vercel_kv_token
 
-- Get a Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey).
-- Get KV credentials by creating a KV database in your Vercel project dashboard (**Storage → Create Database → KV**), then running:
+    NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+    SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 
-      vercel env pull .env.local
+- Gemini key: [Google AI Studio](https://aistudio.google.com/apikey)
+- Supabase keys: your Supabase project → **Settings → API**
 
-### 3. Run locally
+### 3. Database schema
+
+Run the full schema + Row-Level Security policy script inside your Supabase project's **SQL Editor**. This creates: `profiles`, `subjects`, `exam_sessions`, `topics`, `questions`, `attempts`, `pyq_relevance`, all with RLS enabled so users can only ever access their own data.
+
+### 4. Auth redirect URLs
+
+In Supabase → **Authentication → URL Configuration**, set:
+- **Site URL** to your deployed URL (or `http://localhost:3000` for local-only testing)
+- **Redirect URLs**: add both `http://localhost:3000/**` and your production URL + `/**`
+
+Get this wrong and email verification links will open the wrong environment — worth double-checking before inviting anyone else to test.
+
+### 5. Run locally
 
     npm run dev
 
 Visit `http://localhost:3000`.
 
-### 4. Deploy
+### 6. Deploy
 
     npx vercel --prod
 
-Before deploying, make sure all four environment variables above are also added under your Vercel project's **Settings → Environment Variables** (for both Production and Preview).
+Add **all five environment variables above** to your Vercel project's **Settings → Environment Variables** (Production *and* Preview) before deploying — a deploy without them will fail silently on auth/AI features even though the build succeeds.
 
-## How it works, end to end
-
-1. **Upload** — student uploads a lecture PDF (and optionally previous-year papers) and enters exam context
-2. **Extraction** — text is pulled from the PDF(s); Gemini identifies the major topics and subtopics grounded only in that material
-3. **Diagnostic assessment** — Gemini generates 6 multiple-choice questions spanning recall, conceptual understanding, and application, tied to specific topics
-4. **Evaluation** — answers are scored; correct/incorrect/partial status is recorded per topic
-5. **Knowledge-gap detection** — each topic is classified as Strong, Needs Revision, Weak, or Not Assessed
-6. **Priority engine** — non-strong topics are ranked using knowledge-gap severity, question difficulty, and (if available) previous-year-paper relevance, each with a plain-language reason
-7. **Revision session** — the student picks (or is directed to) the top-priority topic and receives a focused explanation, an example, a note on their specific mistake, and 2 new practice questions
-8. **Reassessment** — performance on the practice questions updates that topic's mastery status
-9. **Readiness report** — a final summary of what improved, what's still weak, and the next recommended action, exportable as a PDF
+---
 
 ## Project structure
 
     app/
       page.tsx                          Landing page
-      new-session/                      Upload flow (lecture PDF + optional PYQ)
+      login/, signup/                   Auth pages
+      subjects/                         "My Subjects" hub — main landing page after login
+      profile/                          Student profile + aggregate stats
+      new-session/                      Upload flow (subject selection, lecture PDF, optional PYQ)
       assessment/                       Diagnostic assessment UI
-      dashboard/[sessionId]/            Student dashboard — knowledge overview + next best action
+      dashboard/[sessionId]/            Knowledge overview + "next best action"
       revision/[sessionId]/[topic]/     Personalized revision session
       report/[sessionId]/               Final readiness report + PDF export
+      components/nav.tsx                Shared navigation across authenticated pages
       api/
-        extract/                        Lecture PDF text extraction
-        extract-pyq/                    Previous-year paper text extraction
+        session/create/                 Create a new exam session (auth-derived user, not client-supplied)
+        extract/, extract-pyq/          PDF text extraction
         extract-topics/                 AI topic extraction
         analyze-pyq/                    AI exam-relevance analysis
         generate-assessment/            AI diagnostic question generation
@@ -114,25 +149,37 @@ Before deploying, make sure all four environment variables above are also added 
         generate-revision/              AI revision session generation
         evaluate-followup/              Follow-up scoring + status update
         readiness-report/[sessionId]/   Readiness report aggregation
+        subjects/                       Subject + session listing
+        profile/                        Profile data + stats
     lib/
-      db.ts                             Session persistence (Vercel KV)
+      db.ts                             All data access (Supabase Postgres)
       gemini.ts                         Gemini API wrapper
       types.ts                          Shared TypeScript types
+      supabase/client.ts, server.ts     Supabase clients (browser + server)
       pdf/readiness-report-pdf.tsx      PDF export template
+
+---
 
 ## Design principles
 
 - **Grounded generation** — every AI-generated question, explanation, and recommendation is based only on the student's own uploaded material; the system is instructed never to invent content beyond it
 - **Explainable, not black-box** — every priority recommendation comes with a plain-English reason a student can actually evaluate
 - **Honest about limits** — no fabricated readiness percentages, no promises of predicting exact exam questions or scores
+- **Security by default** — data isolation is enforced at the database level (Row-Level Security), not just hidden in the UI
 - **Focused scope** — deliberately not a full LMS, chatbot, or attendance/calendar tool; one polished exam-prep flow, done well
 
-## What's not included (by design)
+---
 
-- Multi-subject dashboard (currently one exam session at a time)
-- User authentication (single-session use, no login flow)
-- Support for file formats beyond PDF
+## Known limitations / not yet built
+
+- PDF-only uploads (DOCX/PPTX not yet supported)
+- Password reset flow not yet implemented
+- Exam date/study time are set once at session creation, not editable afterward
+- One lecture PDF per session (multiple-PDF merge not yet supported)
+- No retry loop if a student still misses a follow-up question — they're returned to the dashboard instead
+
+---
 
 ## License
 
-Built for hackathon submission purposes.
+Built for hackathon submission and continued personal development.
