@@ -160,8 +160,14 @@ export default function AssessmentPage() {
 
             {/* Small Muted Topic Name */}
             <div className="mb-2">
-              <span className="text-xs text-text-muted font-medium tracking-wide">
-                {questions[currentIndex].topic}
+              <span className="text-xs text-text-muted font-medium tracking-wide flex items-center gap-1.5">
+                <span>{questions[currentIndex].topic}</span>
+                {questions[currentIndex].pageReferences &&
+                  questions[currentIndex].pageReferences!.length > 0 && (
+                    <span className="font-mono text-text-muted/80">
+                      — p. {questions[currentIndex].pageReferences!.join(", ")}
+                    </span>
+                  )}
               </span>
             </div>
 

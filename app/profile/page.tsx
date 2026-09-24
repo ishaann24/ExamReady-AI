@@ -2,6 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+} from "recharts";
 
 interface ProfileData {
   fullName: string;
@@ -16,11 +25,17 @@ interface ProfileStats {
   totalImprovedTopics: number;
 }
 
+interface ProgressDataPoint {
+  date: string;
+  cumulativeTopicsMastered: number;
+}
+
 export default function ProfilePage() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [stats, setStats] = useState<ProfileStats | null>(null);
+  const [progress, setProgress] = useState<ProgressDataPoint[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,29 +48,55 @@ export default function ProfilePage() {
   useEffect(() => {
     let isMounted = true;
 
-    const fetchProfile = async () => {
+    const fetchProfileData = async () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/profile");
-        if (!res.ok) {
-          if (res.status === 401) {
+        const [profileRes, progressRes] = await Promise.all([
+          fetch("/api/profile"),
+          fetch("/api/profile/progress"),
+        ]);
+
+        if (!profileRes.ok) {
+          if (profileRes.status === 401) {
             router.push("/login?redirectTo=/profile");
             return;
           }
-          const errData = await res.json().catch(() => ({}));
+          const errData = await profileRes.json().catch(() => ({}));
           throw new Error(errData.error || "Failed to load profile.");
         }
-        const data = await res.json();
+
+        const profileJson = await profileRes.json();
+        let progressJson = { progress: [] };
+        if (progressRes.ok) {
+          progressJson = await progressRes.json();
+        }
+
         if (isMounted) {
-          setProfile(data.profile || { fullName: "Student", email: "", createdAt: new Date().toISOString() });
-          setStats(data.stats || { totalSubjects: 0, totalSessions: 0, totalStrongTopics: 0, totalImprovedTopics: 0 });
-          setEditedName(data.profile?.fullName || "");
+          setProfile(
+            profileJson.profile || {
+              fullName: "Student",
+              email: "",
+              createdAt: new Date().toISOString(),
+            }
+          );
+          setStats(
+            profileJson.stats || {
+              totalSubjects: 0,
+              totalSessions: 0,
+              totalStrongTopics: 0,
+              totalImprovedTopics: 0,
+            }
+          );
+          setProgress(progressJson.progress || []);
+          setEditedName(profileJson.profile?.fullName || "");
         }
       } catch (err: any) {
         console.error("Profile load error:", err);
         if (isMounted) {
-          setError(err.message || "An unexpected error occurred while loading profile.");
+          setError(
+            err.message || "An unexpected error occurred while loading profile."
+          );
         }
       } finally {
         if (isMounted) {
@@ -64,7 +105,7 @@ export default function ProfilePage() {
       }
     };
 
-    fetchProfile();
+    fetchProfileData();
 
     return () => {
       isMounted = false;
@@ -110,6 +151,17 @@ export default function ProfilePage() {
     }
     return (name[0] || "S").toUpperCase();
   };
+
+  const formattedProgress = progress.map((p) => {
+    const d = new Date(p.date);
+    const formattedDate = isNaN(d.getTime())
+      ? p.date
+      : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return {
+      ...p,
+      displayDate: formattedDate,
+    };
+  });
 
   return (
     <main className="min-h-screen bg-surface-muted text-text flex flex-col justify-between px-6 py-8 md:px-16 max-w-5xl mx-auto w-full">
@@ -313,6 +365,79 @@ export default function ProfilePage() {
                   </span>
                 </div>
               </div>
+            </section>
+
+            {/* 3. Recharts Cumulative Progress Over Time */}
+            <section className="bg-surface border border-slate-200 rounded-xl p-6 sm:p-8 shadow-xs">
+              <div className="mb-6">
+                <h2 className="text-lg font-bold text-text">
+                  Mastery Progress Over Time
+                </h2>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Cumulative count of topics marked strong over time.
+                </p>
+              </div>
+
+              {progress.length < 2 ? (
+                <div className="py-12 border border-dashed border-slate-200 rounded-lg bg-surface-muted/50 text-center">
+                  <p className="text-sm text-text-muted font-medium">
+                    Complete more sessions to see your progress over time.
+                  </p>
+                  <p className="text-xs text-text-muted/70 mt-1">
+                    At least 2 mastered topic milestones are required to generate your progress chart.
+                  </p>
+                </div>
+              ) : (
+                <div className="w-full h-64 pt-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={formattedProgress}
+                      margin={{ top: 10, right: 20, left: -20, bottom: 0 }}
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        vertical={false}
+                        stroke="#e2e8f0"
+                      />
+                      <XAxis
+                        dataKey="displayDate"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 12, fill: "#64748b" }}
+                        dy={10}
+                      />
+                      <YAxis
+                        allowDecimals={false}
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 12, fill: "#64748b" }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#ffffff",
+                          borderColor: "#cbd5e1",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          boxShadow: "0 1px 3px 0 rgb(0 0 0 / 0.1)",
+                        }}
+                        labelStyle={{ fontWeight: "bold", color: "#0f172a" }}
+                        formatter={(value: any) => [
+                          `${value} topics`,
+                          "Cumulative Mastered",
+                        ]}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="cumulativeTopicsMastered"
+                        stroke="#4f46e5"
+                        strokeWidth={2.5}
+                        dot={{ r: 4, fill: "#4f46e5", strokeWidth: 0 }}
+                        activeDot={{ r: 6, fill: "#4f46e5" }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </section>
           </div>
         )}

@@ -1,20 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { createClient } from "@/lib/supabase/server";
-import { getSession, saveQuestions, getTopicIdByName } from "@/lib/db";
+import { getSession, saveQuestions, getTopicIdByName, findRelevantChunks } from "@/lib/db";
 import { callGemini } from "@/lib/gemini";
 import { getCached, setCached } from "@/lib/gemini-cache";
-import { Question } from "@/lib/types";
+import { Question, RevisionSession } from "@/lib/types";
 
 export const runtime = "nodejs";
-
-export interface RevisionSession {
-  topic: string;
-  explanation: string;
-  example: string;
-  commonMistake: string;
-  practiceQuestions: Question[];
-}
+export type { RevisionSession };
 
 export async function POST(req: NextRequest) {
   try {
@@ -52,7 +45,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const text = session.extractedText || "";
+    // Retrieve topic-specific chunks via vector search
+    let retrievedContext = "";
+    const retrievedChunks = await findRelevantChunks(sessionId, topic, 4);
+
+    if (retrievedChunks && retrievedChunks.length > 0) {
+      retrievedContext = retrievedChunks
+        .map((c) => `[Page ${c.pageNumber}]:\n${c.content}`)
+        .join("\n\n---\n\n");
+    } else if (session.extractedText && session.extractedText.trim()) {
+      retrievedContext = `[Page 1]:\n${session.extractedText.slice(0, 15000)}`;
+    } else {
+      return NextResponse.json(
+        { error: "No course content or retrieved lecture chunks found for this topic." },
+        { status: 400 }
+      );
+    }
 
     // Find missed questions for this topic in session results
     const results = session.results?.results || [];
@@ -85,11 +93,12 @@ export async function POST(req: NextRequest) {
         correct_index: q.correct_index,
         explanation: q.explanation,
         question_type: "followup",
+        pageReferences: q.pageReferences || [],
       }));
 
       const savedRows = await saveQuestions(sessionId, topicNameToIdMap, questionsToSave);
 
-      return savedRows.map((r) => ({
+      return savedRows.map((r, i) => ({
         id: r.id,
         topic,
         difficulty: (r.difficulty as any) || "conceptual",
@@ -97,6 +106,9 @@ export async function POST(req: NextRequest) {
         options: r.options,
         correct_index: r.correct_index,
         explanation: r.explanation || "",
+        pageReferences: Array.isArray(r.page_references) && r.page_references.length > 0
+          ? r.page_references
+          : pQuestions[i]?.pageReferences || [],
       }));
     };
 
@@ -107,7 +119,7 @@ export async function POST(req: NextRequest) {
         JSON.stringify({
           sessionId,
           topic,
-          textLength: text.length,
+          contextHash: retrievedContext.slice(0, 500),
           missedCount: missedForTopic.length,
         })
       )
@@ -133,8 +145,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const truncatedText = text.slice(0, 30000);
-
     const prompt = `You are a master academic tutor specializing in active recall and targeted revision.
 
 Topic to Revise: "${topic}"
@@ -142,11 +152,12 @@ Topic to Revise: "${topic}"
 Student Diagnostic Performance Context:
 ${missedContext}
 
-Course Material Text:
-${truncatedText}
+Retrieved Course Material Chunks:
+${retrievedContext}
 
 Instructions:
 Generate a concise, targeted revision session for this topic grounded STRICTLY in the course material text above.
+Include page number references corresponding to the page numbers in the provided chunks.
 
 Return ONLY a valid JSON object matching this exact structure with NO markdown fences:
 {
@@ -154,6 +165,7 @@ Return ONLY a valid JSON object matching this exact structure with NO markdown f
   "explanation": "A clear, focused 2-3 sentence explanation clarifying the core concept.",
   "example": "A concrete, practical example illustrating how this concept works in practice.",
   "commonMistake": "A specific common pitfall or misconception note, directly addressing why students miss questions on this topic.",
+  "pageReferences": [1],
   "practiceQuestions": [
     {
       "id": "rq1",
@@ -162,7 +174,8 @@ Return ONLY a valid JSON object matching this exact structure with NO markdown f
       "question": "First practice MCQ question text...",
       "options": ["Option A", "Option B", "Option C", "Option D"],
       "correct_index": 0,
-      "explanation": "Clear explanation of the correct choice."
+      "explanation": "Clear explanation of the correct choice.",
+      "pageReferences": [1]
     },
     {
       "id": "rq2",
@@ -171,7 +184,8 @@ Return ONLY a valid JSON object matching this exact structure with NO markdown f
       "question": "Second practice MCQ question text...",
       "options": ["Option A", "Option B", "Option C", "Option D"],
       "correct_index": 1,
-      "explanation": "Clear explanation of the correct choice."
+      "explanation": "Clear explanation of the correct choice.",
+      "pageReferences": [1]
     }
   ]
 }`;

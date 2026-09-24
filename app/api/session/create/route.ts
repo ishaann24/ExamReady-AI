@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createExamSession, saveExtractedText } from "@/lib/db";
+import { createExamSession, saveExtractedText, saveLectureChunks } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { subjectId, subjectName, examDate, studyTimeMinutes, extractedText } = body;
+    const { subjectId, subjectName, examDate, studyTimeMinutes, extractedText, chunks } = body;
 
     let subjectInput: { subjectId?: string | null; subjectName?: string | null };
 
@@ -41,6 +41,10 @@ export async function POST(req: NextRequest) {
       await saveExtractedText(sessionId, extractedText);
     }
 
+    if (chunks && Array.isArray(chunks) && chunks.length > 0) {
+      await saveLectureChunks(sessionId, chunks);
+    }
+
     return NextResponse.json({ id: sessionId, sessionId });
   } catch (error: any) {
     console.error("Create session error:", error);
@@ -50,3 +54,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+

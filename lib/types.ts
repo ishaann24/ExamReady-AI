@@ -17,6 +17,16 @@ export interface Question {
   options: string[];
   correct_index: number;
   explanation: string;
+  pageReferences?: number[];
+}
+
+export interface RevisionSession {
+  topic: string;
+  explanation: string;
+  example: string;
+  commonMistake: string;
+  pageReferences?: number[];
+  practiceQuestions: Question[];
 }
 
 export interface AnswerResult {
@@ -37,11 +47,23 @@ export interface AssessmentResult {
   max_score: number;
 }
 
+export interface LectureChunk {
+  id?: string;
+  exam_session_id?: string;
+  page_number?: number;
+  pageNumber: number;
+  content?: string;
+  text: string;
+  created_at?: string;
+}
+
 export interface Session {
   id: string;
+  shareToken?: string;
   fileName?: string;
   pages?: number;
   extractedText: string;
+  chunks?: LectureChunk[];
   pyqText?: string;
   topics: Topic[];
   questions: Question[];
@@ -52,4 +74,5 @@ export interface Session {
   availableStudyTimeMinutes?: number | null;
   createdAt: string;
 }
+
 

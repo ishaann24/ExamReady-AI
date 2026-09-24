@@ -1,5 +1,6 @@
 import { createClient } from "./supabase/server";
 import { Session, Topic, Question, AnswerResult, AssessmentResult, KnowledgeGapStatus } from "./types";
+import { embedText } from "./embeddings";
 
 /**
  * Creates a subjects row for the user if one doesn't exist with that exact name,
@@ -139,6 +140,7 @@ export async function getSession(examSessionId: string): Promise<Session | null>
       options: Array.isArray(q.options) ? q.options : [],
       correct_index: q.correct_index,
       explanation: q.explanation || "",
+      pageReferences: Array.isArray(q.page_references) ? q.page_references : [],
     };
   });
 
@@ -197,10 +199,25 @@ export async function getSession(examSessionId: string): Promise<Session | null>
     }
   });
 
+  // 6. Fetch lecture chunks
+  const { data: chunkRows } = await supabase
+    .from("lecture_chunks")
+    .select("*")
+    .eq("exam_session_id", examSessionId)
+    .order("page_number", { ascending: true });
+
+  const chunksList = (chunkRows || []).map((c) => ({
+    id: c.id,
+    pageNumber: c.page_number,
+    text: c.content,
+  }));
+
   return {
     id: sessionRow.id,
+    shareToken: sessionRow.share_token || undefined,
     fileName: (sessionRow.subjects as any)?.name || "Course Study Material",
     extractedText: sessionRow.extracted_text || "",
+    chunks: chunksList.length > 0 ? chunksList : undefined,
     pyqText: sessionRow.pyq_text || undefined,
     examDate: sessionRow.exam_date || null,
     availableStudyTimeMinutes: sessionRow.available_study_time_minutes || null,
@@ -211,6 +228,134 @@ export async function getSession(examSessionId: string): Promise<Session | null>
     pyqRelevance: Object.keys(pyqRelevance).length > 0 ? pyqRelevance : undefined,
     createdAt: sessionRow.created_at,
   };
+}
+
+/**
+ * Regenerates the share_token for an exam session, invalidating any previous share link.
+ */
+export async function regenerateShareToken(sessionId: string): Promise<string> {
+  const supabase = await createClient();
+  const newShareToken = crypto.randomUUID();
+
+  const { data, error } = await supabase
+    .from("exam_sessions")
+    .update({ share_token: newShareToken })
+    .eq("id", sessionId)
+    .select("share_token")
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Failed to regenerate share token: ${error?.message || "Unknown error"}`);
+  }
+
+  return data.share_token;
+}
+
+/**
+ * Saves page-level lecture chunks for an exam session into lecture_chunks table,
+ * computing 384-dimensional embeddings for each chunk.
+ */
+export async function saveLectureChunks(
+  examSessionId: string,
+  chunks: Array<{ pageNumber?: number; page_number?: number; text?: string; content?: string }>
+) {
+  if (!chunks || chunks.length === 0) return [];
+  const supabase = await createClient();
+
+  const rows = await Promise.all(
+    chunks.map(async (c) => {
+      const pageNumber = c.pageNumber ?? c.page_number ?? 1;
+      const content = c.text ?? c.content ?? "";
+      let embedding: number[] | null = null;
+      if (content.trim()) {
+        try {
+          embedding = await embedText(content);
+        } catch (err) {
+          console.error(`Failed to generate embedding for page ${pageNumber}:`, err);
+        }
+      }
+      return {
+        exam_session_id: examSessionId,
+        page_number: pageNumber,
+        content: content,
+        embedding: embedding,
+      };
+    })
+  );
+
+  const { data, error } = await supabase
+    .from("lecture_chunks")
+    .insert(rows)
+    .select("*");
+
+  if (error) {
+    throw new Error(`Failed to save lecture chunks: ${error.message}`);
+  }
+
+  return data;
+}
+
+/**
+ * Retrieves lecture_chunks for an exam session ordered by page_number.
+ */
+export async function getLectureChunks(examSessionId: string) {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("lecture_chunks")
+    .select("*")
+    .eq("exam_session_id", examSessionId)
+    .order("page_number", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to fetch lecture chunks: ${error.message}`);
+  }
+
+  return data || [];
+}
+
+/**
+ * Embeds the query text and uses pgvector cosine similarity search to find
+ * the topK most relevant lecture chunks for an exam session.
+ */
+export async function findRelevantChunks(
+  examSessionId: string,
+  query: string,
+  topK: number = 3
+): Promise<Array<{ id: string; pageNumber: number; content: string; similarity?: number }>> {
+  if (!query || !query.trim()) {
+    return [];
+  }
+
+  const queryEmbedding = await embedText(query);
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc("match_lecture_chunks", {
+    query_embedding: queryEmbedding,
+    match_session_id: examSessionId,
+    match_count: topK,
+  });
+
+  if (error) {
+    console.error("RPC match_lecture_chunks error (falling back to simple query):", error.message);
+    const { data: chunksData } = await supabase
+      .from("lecture_chunks")
+      .select("*")
+      .eq("exam_session_id", examSessionId)
+      .limit(topK);
+
+    return (chunksData || []).map((c: any) => ({
+      id: c.id,
+      pageNumber: c.page_number,
+      content: c.content,
+    }));
+  }
+
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    pageNumber: row.page_number,
+    content: row.content,
+    similarity: row.similarity,
+  }));
 }
 
 /**
@@ -273,6 +418,8 @@ export async function saveQuestions(
     correct_index: number;
     explanation?: string;
     question_type?: string;
+    pageReferences?: number[];
+    page_references?: number[];
   }[]
 ) {
   const supabase = await createClient();
@@ -285,6 +432,7 @@ export async function saveQuestions(
     explanation: q.explanation || "",
     difficulty: q.difficulty || "conceptual",
     question_type: q.question_type || "diagnostic",
+    page_references: q.pageReferences || q.page_references || [],
   }));
 
   const { data, error } = await supabase

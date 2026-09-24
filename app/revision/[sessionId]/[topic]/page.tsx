@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { RevisionSession } from "../../../api/generate-revision/route";
+import { Question, RevisionSession } from "@/lib/types";
 
 type PagePhase = "loading" | "reading" | "practicing" | "completed" | "error";
 
@@ -186,9 +186,16 @@ export default function RevisionPage({
 
             {/* Explanation Section */}
             <div className="mb-8">
-              <h3 className="text-xs uppercase tracking-wider font-bold text-text-muted mb-2 font-mono">
-                Core Concept
-              </h3>
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="text-xs uppercase tracking-wider font-bold text-text-muted font-mono">
+                  Core Concept
+                </h3>
+                {data.pageReferences && data.pageReferences.length > 0 && (
+                  <span className="text-xs text-text-muted/80 font-mono">
+                    — p. {data.pageReferences.join(", ")}
+                  </span>
+                )}
+              </div>
               <p className="text-text/90 text-base leading-relaxed font-normal">
                 {data.explanation}
               </p>
@@ -247,8 +254,14 @@ export default function RevisionPage({
 
             {/* Small Muted Topic Name */}
             <div className="mb-2">
-              <span className="text-xs text-text-muted font-medium tracking-wide">
-                {data.topic}
+              <span className="text-xs text-text-muted font-medium tracking-wide flex items-center gap-1.5">
+                <span>{data.topic}</span>
+                {data.practiceQuestions[currentIndex].pageReferences &&
+                  data.practiceQuestions[currentIndex].pageReferences!.length > 0 && (
+                    <span className="font-mono text-text-muted/80">
+                      — p. {data.practiceQuestions[currentIndex].pageReferences!.join(", ")}
+                    </span>
+                  )}
               </span>
             </div>
 
@@ -260,7 +273,7 @@ export default function RevisionPage({
             {/* Options List */}
             <div className="border border-slate-200 rounded-md divide-y divide-slate-200 bg-surface shadow-xs mb-8">
               {data.practiceQuestions[currentIndex].options.map(
-                (optionText, optIdx) => {
+                (optionText: string, optIdx: number) => {
                   const isSelected = selectedOption === optIdx;
                   const optionLabel = String.fromCharCode(65 + optIdx);
 
@@ -356,7 +369,7 @@ export default function RevisionPage({
 
             {/* Practice Explanations List */}
             <div className="space-y-4 mb-8">
-              {data.practiceQuestions.map((q, idx) => {
+              {data.practiceQuestions.map((q: Question, idx: number) => {
                 const resItem = outcome.results[idx];
                 const isCorrect = resItem?.correct;
 
@@ -397,6 +410,11 @@ export default function RevisionPage({
                     <p className="text-xs text-text/80 leading-relaxed pt-1">
                       <span className="text-text-muted font-semibold">Explanation:</span>{" "}
                       {q.explanation}
+                      {q.pageReferences && q.pageReferences.length > 0 && (
+                        <span className="font-mono text-text-muted/80 ml-1.5">
+                          — p. {q.pageReferences.join(", ")}
+                        </span>
+                      )}
                     </p>
                   </div>
                 );

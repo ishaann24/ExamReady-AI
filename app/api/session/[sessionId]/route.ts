@@ -3,10 +3,11 @@ import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/db";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { sessionId: string } }
 ) {
   try {
     const supabase = await createClient();
@@ -18,18 +19,18 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { id } = params;
-    if (!id) {
+    const { sessionId } = params;
+    if (!sessionId) {
       return NextResponse.json(
         { error: "Session ID is required." },
         { status: 400 }
       );
     }
 
-    const session = await getSession(id);
+    const session = await getSession(sessionId);
     if (!session) {
       return NextResponse.json(
-        { error: `Session '${id}' not found or access forbidden.` },
+        { error: `Session '${sessionId}' not found or access forbidden.` },
         { status: 404 }
       );
     }

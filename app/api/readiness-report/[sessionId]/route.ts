@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getSession } from "@/lib/db";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET(
   _req: NextRequest,
@@ -53,6 +54,7 @@ export async function GET(
     const followupCorrect = 0;
 
     return NextResponse.json({
+      shareToken: session.shareToken,
       totalTopics,
       assessedTopics,
       strongTopics,

@@ -17,6 +17,7 @@ interface ExtractResult {
   pages: number;
   fileName: string;
   text: string;
+  chunks?: { pageNumber: number; text: string }[];
   sessionId?: string;
 }
 
@@ -119,9 +120,12 @@ export default function NewSessionPage() {
   };
 
   const handleFile = async (file: File) => {
-    if (file.type !== "application/pdf" && !file.name.endsWith(".pdf")) {
+    const isPdf = file.type === "application/pdf" || file.name.endsWith(".pdf");
+    const isDocx = file.name.endsWith(".docx") || file.type.includes("wordprocessingml");
+
+    if (!isPdf && !isDocx) {
       setStep("error");
-      setErrorMessage("Please upload a valid PDF document.");
+      setErrorMessage("Please upload a valid PDF or Word document (.docx).");
       return;
     }
 
@@ -139,20 +143,21 @@ export default function NewSessionPage() {
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to extract text from PDF.");
+        throw new Error(errorData.error || "Failed to extract text from document.");
       }
 
-      const data: { pages: number; text: string } = await res.json();
+      const data: { pages: number; text: string; chunks?: { pageNumber: number; text: string }[] } = await res.json();
 
       // If user is creating a new subject and hasn't typed a name yet, prefill from filename
       if (selectedSubjectId === "new" && !subjectName.trim()) {
-        const defaultSubject = file.name.replace(/\.pdf$/i, "").replace(/[-_]/g, " ");
+        const defaultSubject = file.name.replace(/\.(pdf|docx)$/i, "").replace(/[-_]/g, " ");
         setSubjectName(defaultSubject);
       }
 
       setExtractResult({
         pages: data.pages,
         text: data.text,
+        chunks: data.chunks,
         fileName: file.name,
       });
       setStep("pdf-ready");
@@ -191,6 +196,7 @@ export default function NewSessionPage() {
           examDate: examDate || null,
           studyTimeMinutes: studyTimeMinutes ? parseInt(studyTimeMinutes, 10) : null,
           extractedText: extractResult.text,
+          chunks: extractResult.chunks,
         }),
       });
 
@@ -397,7 +403,7 @@ export default function NewSessionPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="application/pdf"
+                accept="application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 onChange={onFileSelect}
                 className="hidden"
               />
@@ -419,10 +425,10 @@ export default function NewSessionPage() {
               </div>
 
               <p className="text-text font-semibold text-base mb-1">
-                Drop course material PDF here, or click to browse
+                Drop course material PDF or Word document here, or click to browse
               </p>
               <p className="text-xs text-text-muted">
-                PDF documents up to 50MB
+                PDF or Word documents (.docx) up to 50MB
               </p>
             </div>
           </div>
@@ -607,7 +613,7 @@ export default function NewSessionPage() {
               <input
                 ref={pyqInputRef}
                 type="file"
-                accept="application/pdf"
+                accept="application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 multiple
                 onChange={onPYQFileSelect}
                 className="hidden"
@@ -622,7 +628,7 @@ export default function NewSessionPage() {
                 }`}
               >
                 <span className="text-sm font-medium text-text">
-                  {pyqStatus === "uploading" ? "Uploading..." : "Select PYQ PDF files"}
+                  {pyqStatus === "uploading" ? "Uploading..." : "Select PYQ PDF or Word documents"}
                 </span>
                 {pyqResult && (
                   <p className="text-xs text-emerald-700 font-semibold mt-1">

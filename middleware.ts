@@ -49,6 +49,12 @@ export async function middleware(request: NextRequest) {
   ];
 
   const pathname = request.nextUrl.pathname;
+
+  // Explicitly allow public share routes to bypass auth checks
+  if (pathname.startsWith("/share") || pathname.startsWith("/api/share")) {
+    return supabaseResponse;
+  }
+
   const isProtectedRoute = protectedRoutes.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
   );

@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getSession, updateTopicStatus, getTopicIdByName } from "@/lib/db";
 import { KnowledgeGapStatus, Question, AnswerResult } from "@/lib/types";
+import {
+  classifyTopicStatus,
+  calculatePriorityScore,
+  formatTopicReason,
+} from "@/lib/priority-engine";
 
 export const runtime = "nodejs";
 
@@ -66,34 +71,29 @@ export async function POST(req: NextRequest) {
     const knowledgeGaps: Record<string, KnowledgeGapStatus> = {};
     const prioritizedTopics: PrioritizedTopic[] = [];
 
+    // Max PYQ count across topics for relative scaling
+    const maxPyqCount = session.pyqRelevance
+      ? Math.max(
+          ...Object.values(session.pyqRelevance).map((v) => v.questionCount || 0),
+          1
+        )
+      : 1;
+
     for (const topic of topics) {
       const tResults = topicResults[topic.name] || [];
       const totalQuestions = tResults.length;
+      const correctQuestions = tResults.filter((r) => r.correct).length;
 
-      let status: KnowledgeGapStatus = "not_assessed";
-      let correctQuestions = 0;
-      let reason = "Not assessed in diagnostic quiz.";
+      const status = classifyTopicStatus(tResults);
+      const pyqInfo = session.pyqRelevance?.[topic.name];
+      const pyqQuestionCount = pyqInfo?.questionCount || 0;
 
-      if (totalQuestions > 0) {
-        correctQuestions = tResults.filter((r) => r.correct).length;
-        if (correctQuestions === totalQuestions) {
-          status = "strong";
-          reason = `Mastered all ${totalQuestions} question${totalQuestions === 1 ? "" : "s"} on this topic.`;
-        } else if (correctQuestions === 0) {
-          status = "weak";
-          const pyqInfo = (session.pyqRelevance && session.pyqRelevance[topic.name])
-            ? `, and it appears in ${session.pyqRelevance[topic.name].questionCount} question${session.pyqRelevance[topic.name].questionCount === 1 ? "" : "s"} across your previous-year papers`
-            : "";
-          reason = `Missed ${totalQuestions} of ${totalQuestions} question${totalQuestions === 1 ? "" : "s"} on this topic${pyqInfo}.`;
-        } else {
-          status = "needs_revision";
-          const missedCount = totalQuestions - correctQuestions;
-          const pyqInfo = (session.pyqRelevance && session.pyqRelevance[topic.name])
-            ? `, and it appears in ${session.pyqRelevance[topic.name].questionCount} question${session.pyqRelevance[topic.name].questionCount === 1 ? "" : "s"} across your previous-year papers`
-            : "";
-          reason = `Missed ${missedCount} of ${totalQuestions} question${totalQuestions === 1 ? "" : "s"} on this topic${pyqInfo}.`;
-        }
-      }
+      const reason = formatTopicReason(
+        status,
+        totalQuestions,
+        correctQuestions,
+        pyqQuestionCount
+      );
 
       knowledgeGaps[topic.name] = status;
 
@@ -103,18 +103,14 @@ export async function POST(req: NextRequest) {
         try {
           await updateTopicStatus(topicId, status);
         } catch (updateErr) {
-          console.error(`Failed to update status for topic ${topic.name}:`, updateErr);
+          console.error(
+            `Failed to update status for topic ${topic.name}:`,
+            updateErr
+          );
         }
       }
 
-      // Calculate Priority Score per non-strong topic
-      // priority = (0.5 * gapSeverity) + (0.2 * difficulty) + (0.3 * examRelevance)
-      let gapSeverity = 0;
-      if (status === "weak") gapSeverity = 1.0;
-      else if (status === "needs_revision") gapSeverity = 0.5;
-      else if (status === "not_assessed") gapSeverity = 0.3;
-      else gapSeverity = 0.0; // strong
-
+      // Compute average difficulty for missed questions
       const missedResults = tResults.filter((r) => !r.correct);
       let avgDifficultyScore = 0.5;
 
@@ -132,19 +128,12 @@ export async function POST(req: NextRequest) {
         avgDifficultyScore = sum / missedResults.length;
       }
 
-      let examRelevance = 0;
-      if (session.pyqRelevance && session.pyqRelevance[topic.name]) {
-        const maxCount = Math.max(
-          ...Object.values(session.pyqRelevance).map((v) => v.questionCount || 0),
-          1
-        );
-        examRelevance = session.pyqRelevance[topic.name].questionCount / maxCount;
-      }
-
-      const priorityScore =
-        status === "strong"
-          ? 0
-          : Number((0.5 * gapSeverity + 0.2 * avgDifficultyScore + 0.3 * examRelevance).toFixed(3));
+      const priorityScore = calculatePriorityScore(
+        topic.name,
+        status,
+        avgDifficultyScore,
+        pyqQuestionCount > 0 ? { questionCount: pyqQuestionCount, maxCount: maxPyqCount } : 0
+      );
 
       prioritizedTopics.push({
         name: topic.name,
@@ -167,7 +156,11 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("Knowledge Gaps API Error:", error);
     return NextResponse.json(
-      { error: error?.message || "An error occurred while evaluating knowledge gaps." },
+      {
+        error:
+          error?.message ||
+          "An error occurred while evaluating knowledge gaps.",
+      },
       { status: 500 }
     );
   }
